@@ -1,0 +1,76 @@
+services:
+  traefik:
+    image: traefik:v3.0
+    restart: always
+    networks:
+      - webgateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik-acme-data:/etc/traefik/acme
+    command:
+      # Enable dashboard
+      - --api.dashboard=true
+      # Entrypoints
+      - --entrypoints=Name:http Address::80
+      - --entrypoints=Name:https Address::443 TLS
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=$ACME_EMAIL
+      - --certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpChallenge.entrypoint=web
+      # Uncomment line below to use ACME staging dir instead of the production one
+      # - --certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+      - --providers.docker=true
+      # - --log.level=debug # Uncomment to get verbose logs from Traefik.
+      - --providers.docker.network=webgateway
+    labels:
+      # Dashboard config
+      - traefik.http.routers.traefik-dash.rule=Host(`traefik.${MANAGEMENT_DOMAIN}`)
+      - traefik.http.routers.traefik-dash.service=api@internal
+      - traefik.http.routers.traefik-dash.middlewares=traefik-dash-auth
+      - traefik.http.routers.traefik-dash.tls=true
+      - traefik.http.routers.traefik-dash.tls.certResolver=letsencrypt
+      - traefik.http.middlewares.traefik-dash-auth.basicauth.users=$TRAEFIK_DASHBOARD_HTPASSWD
+
+
+  portainer:
+    image: portainer/portainer-ce:2.27.9-alpine
+    restart: always
+    networks:
+      - webgateway
+    volumes:
+      - ./portainer-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "traefik.http.routers.rtr-portainer.rule=Host(`portainer.${MANAGEMENT_DOMAIN}`)"
+      - traefik.http.routers.rtr-portainer.tls=true
+      - traefik.http.routers.rtr-portainer.tls.certResolver=letsencrypt
+      - traefik.http.services.srv-portainer.loadbalancer.server.port=9000
+
+  restic:
+    image: lobaro/restic-backup-docker:1.2-0.9.4
+    restart: always
+    hostname: ${RESTIC_HOSTNAME}
+    environment:
+      RESTIC_REPOSITORY: /mnt/restic
+      BACKUP_CRON: 0 0 * * *
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD}
+      RESTIC_FORGET_ARGS: >
+        --prune
+        --keep-daily 7
+        --keep-weekly 5
+        --keep-monthly 12
+        --keep-yearly 75
+    volumes:
+      - /docker-volumes:/data/docker-volumes
+      - ./portainer-data:/data/portainer-data
+      - /backups:/mnt/restic
+
+networks:
+  webgateway:
+    external: true

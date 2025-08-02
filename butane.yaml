@@ -1,0 +1,85 @@
+variant: flatcar
+version: 1.0.0
+systemd:
+  units:
+    # Add a service that will run once on the first startup to configure the server.
+    - name: initial-setup.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Initial Setup After First Boot
+        ConditionPathExists=!/var/provisioner/initial-setup-complete
+
+        [Service]
+        Type=oneshot
+        ExecStart=/var/provisioner/initial-setup.sh
+        ExecStartPost=/usr/bin/touch /var/provisioner/initial-setup-complete
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=multi-user.target
+    # Ensure docker starts automatically instead of being only socket-activated
+    - name: docker.service
+      enabled: true
+storage:
+  links:
+    # Ensure docker starts automatically instead of being only socket-activated
+    - path: /etc/systemd/system/multi-user.target.wants/docker.service
+      target: /usr/lib/systemd/system/docker.service
+      hard: false
+      overwrite: true
+  directories:
+    - path: /docker-compose-core-stack
+      user:
+        name: root
+      group:
+        name: docker
+      mode: 0600
+    - path: /docker-volumes
+      mode: 0600
+      user:
+        name: root
+      group:
+        name: docker
+    - path: /backups
+      mode: 0600
+      user:
+        name: root
+      group:
+        name: docker
+  files:
+    - path: /var/provisioner/initial-setup.sh
+      mode: 0744
+      user:
+        name: root
+      contents:
+        local: ./initial-setup.sh
+    - path: /docker-compose-core-stack/compose.yaml
+      mode: 0600
+      user:
+        name: root
+      group:
+        name: docker
+      contents:
+        local: ./docker-compose-core-stack.yaml
+    - path: /docker-compose-core-stack/.env
+      mode: 0600
+      user:
+        name: root
+      group:
+        name: docker
+      contents:
+        local: ./.env
+    # Configure DNS to disable the local DNS stub listener on port 53 so that we can run our own DNS server.
+    - path: /etc/systemd/resolved.conf.d/listen-port.conf
+      overwrite: true
+      mode: 0644
+      contents:
+        inline: |
+          [Resolve]
+          DNSStubListener=no
+passwd:
+  users:
+    - name: core
+      ssh_authorized_keys:
+        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILuT8NbUGTNQm79doIpvhn4HvxbVTuu1hsghQpWxfw7P zicklag
